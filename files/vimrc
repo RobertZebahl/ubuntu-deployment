@@ -1,0 +1,53 @@
+colorscheme slate
+set guifont=Monospace\ Regular\ 16
+
+set nowrap
+syntax on
+filetype plugin indent on
+
+set tabstop=4
+set shiftwidth=4
+set expandtab
+
+" Font size in GVim, like a browser's zoom: Ctrl + mouse wheel, or Ctrl++ and
+" Ctrl+- (also Ctrl+= for US keyboards, and the numpad keys); Ctrl+0 goes back
+" to the size it had before the first change. The font of Vim in a terminal
+" belongs to the terminal, which has its own zoom. GTK font names end in the
+" size ("Monospace Regular 14"); it stays at 6 or more. GVim reports Ctrl+- as
+" <C-_>, and only the numpad minus as <C-kMinus>.
+if has('gui')
+  " 'guifont' is empty when GVim runs with its default font; getfontname()
+  " knows that one ("Monospace 10").
+  function! s:CurrentFont() abort
+    return empty(&guifont) ? getfontname() : &guifont
+  endfunction
+  function! s:ResizeFont(step) abort
+    let l:font = s:CurrentFont()
+    if l:font !~# '\d\(,\|$\)'
+      echohl WarningMsg
+      echo 'Cannot change the size of the font "' . l:font . '": its name has no size'
+      echohl None
+      return
+    endif
+    if !exists('s:normal_font')
+      let s:normal_font = l:font
+    endif
+    let &guifont = substitute(l:font, '\d\+\ze\(,\|$\)', '\=max([6, submatch(0) + a:step])', 'g')
+  endfunction
+  function! s:ResetFont() abort
+    if exists('s:normal_font')
+      let &guifont = s:normal_font
+    endif
+  endfunction
+  for s:mode in ['n', 'v', 'i']
+    for s:key in ['<C-ScrollWheelUp>', '<C-+>', '<C-=>', '<C-kPlus>']
+      execute s:mode . 'noremap <silent> ' . s:key . ' <Cmd>call <SID>ResizeFont(1)<CR>'
+    endfor
+    for s:key in ['<C-ScrollWheelDown>', '<C-_>', '<C-->', '<C-kMinus>']
+      execute s:mode . 'noremap <silent> ' . s:key . ' <Cmd>call <SID>ResizeFont(-1)<CR>'
+    endfor
+    for s:key in ['<C-0>', '<C-k0>']
+      execute s:mode . 'noremap <silent> ' . s:key . ' <Cmd>call <SID>ResetFont()<CR>'
+    endfor
+  endfor
+endif

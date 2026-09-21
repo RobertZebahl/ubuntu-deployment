@@ -1,0 +1,674 @@
+# Declarative list of everything to deploy. Each entry is dispatched by
+# `deploy.py` based on its `type`. Supported types:
+#
+#   apt      system-wide packages via apt, always run with sudo.
+#            fields: packages (list), optional when_gpu, optional update
+#            (run `apt update` first, but only if an apt-repo/apt-ppa entry
+#            above changed something in this same run - a repo that was
+#            just added isn't in apt's index yet; an unchanged one is, and
+#            refreshing it on every run would only make the run noisy). A package name may contain
+#            "{kernel_release}", substituted with the target's actual
+#            running kernel version (e.g. "linux-headers-{kernel_release}").
+#
+#   apt-repo add a third-party apt repository (deb822 `.sources` file under
+#            /etc/apt/sources.list.d/), always run with sudo.
+#            fields: filename, uris, suites, optional components, optional
+#            architectures, optional types (default "deb"), and optional
+#            key_src + key_dest if the repo needs a signing key (fetched
+#            and referenced as `signed-by`). A key that is missing or has
+#            expired is downloaded again; if the downloaded key has expired
+#            too, the run fails saying so (upstream hasn't renewed it yet).
+#            The next `apt` entry with `update: true` also runs `apt update`
+#            when apt has never fetched the repo's package lists.
+#
+#   apt-ppa  add an Ubuntu PPA (ppa:owner/name), always run with sudo.
+#            Needs software-properties-common (it provides apt-add-repository,
+#            which understands the ppa: shorthand): install it in an entry
+#            above and name that entry in `needs:`.
+#            fields: ppa (e.g. "ppa:owner/name").
+#
+#   github-deb  install the .deb asset attached to a GitHub repo's latest
+#            release, always run with sudo. Re-resolves "latest" on every
+#            run, so it picks up new releases automatically.
+#            fields: repo ("owner/name"), optional match (substring to
+#            pick the right asset when a release has more than one .deb,
+#            e.g. an arch tag), optional package (the installed package's
+#            name: if the release's version is already installed, nothing
+#            is downloaded or reinstalled; without it the .deb is
+#            reinstalled on every run).
+#
+#   snap     install package(s) via snap, always run with sudo.
+#            fields: packages (list), optional channel (default
+#            "latest/stable"), optional classic (default false - set true
+#            for snaps needing full system access, e.g. IDEs).
+#
+#   user-group  add a user to secondary group(s), always run with sudo.
+#            fields: groups (list), optional user (default: whoever is
+#            running this deploy). Note: group membership only takes
+#            effect in a *new* login session (or after `newgrp <group>`),
+#            not the shell that ran this deploy.
+#
+#   git      clone (or pull, if already cloned) a git repository, no sudo
+#            by default.
+#            fields: src, dest, optional branch, optional sudo (default
+#            false).
+#
+#   uv-tool  isolated CLI tools via `uv tool install` (the pipx replacement),
+#            no sudo, installed for the current user.
+#            fields: tools (list).
+#
+#   uv-pip   importable Python packages via `uv pip install --user`,
+#            no sudo, installed for the current user.
+#            fields: packages (list).
+#
+#   shell    an arbitrary shell command, not idempotent by itself, so it
+#            needs a guard:
+#              creates: <path>          skip if this path already exists
+#              unless: <shell command>  skip if this command exits 0
+#            fields: commands (list), optional creates, optional unless,
+#            optional sudo (default false).
+#
+#   file     copy a static file from files/ to the target.
+#            fields: src, dest, optional mode (a quoted octal string like
+#            "644"; without it the mode of the uploaded file is whatever
+#            the upload leaves, which for a root-owned file may be
+#            unreadable for you), optional sudo (default false).
+#
+#   fstab    mount a disk automatically, only if the device exists on the
+#            target (so the same file works on machines without it). Creates
+#            the mount point, ensures the /etc/fstab line (a line already
+#            present for the same device is replaced, never duplicated) and
+#            mounts it right away if it isn't mounted yet. Always uses sudo
+#            for /etc/fstab and mounting.
+#            fields: device, mountpoint ("~/" is resolved to the home dir),
+#            optional fstype (default auto), options (default defaults),
+#            dump (default 0), pass (default 0), sudo (for creating the
+#            mount point; default false, needed outside your home).
+#
+# An `apt` entry may be marked `bootstrap: true`: bootstrap.py applies it
+# before deploy.py is even loaded, and deploy.py skips it. It's for what deploy.py's *facts* need, since
+# PyInfra evaluates all facts before any operation runs (curl for the GitHub
+# release lookup, git for the git-clone state, gpg for the key-expiry check).
+# `update`, `needs` and `when_gpu` don't apply to it; bootstrap.py refreshes
+# the package index itself if it's over an hour old, and carries on if that
+# fails because of a broken third-party repo.
+#
+# Any entry may set `when_gpu: <amd|nvidia|intel>` to only apply when that
+# GPU vendor is detected (see the GpuVendor fact in deploy.py).
+#
+# An entry either *ensures* something or *tracks* it. An ensure entry (most of
+# them) makes sure something is there and then leaves it alone: once it is
+# installed, a newer version changes nothing. A track entry follows upstream:
+# it checks first whether something newer exists, applies it if so, and
+# reports "No changes" otherwise. Track entries are named "Install/Update ..."
+# (the thing may not be there before the first run), or just "Update ..." if
+# the entry never installs it (today: `git`, `github-deb` with `package:`, and
+# shell entries that guard on an upstream check, like "Update uv", which
+# deploy.sh has installed already). To keep something current, add such an
+# entry for it; nothing else updates it.
+#
+# Every entry needs a `name`, and names are unique: they are how `needs:` (and
+# the run) tell entries apart. Loading this file fails otherwise.
+#
+# `needs: <entry name>` (or a list of names) names the earlier entries this
+# one depends on; loading this file fails if a name isn't an earlier entry.
+# The run goes on after an entry fails, so an entry whose needed entry failed,
+# or doesn't apply on this machine (`when_gpu` doesn't match, the `fstab` disk
+# is absent), is skipped with a warning, and so is what needs that one: name
+# the repository entry in the `needs:` of the package entry that installs from
+# it. An entry skipped by `skip_if_exists` counts as satisfied instead.
+# `skip_if_exists: <path>` (any type) skips the entry if that path
+# already exists when the run starts ("~/" is resolved). It's for a
+# repository that something else already provides, see the Steam entries.
+#
+# Entries are applied in the order they appear here. `uv-tool`/`uv-pip`
+# entries need `uv`, which deploy.sh has installed before anything runs (the
+# "Update uv" entry keeps it current).
+
+- type: apt
+  name: Install tools that deploy.py's facts need
+  bootstrap: true
+  packages:
+    - curl
+    - git
+    - ca-certificates
+    - gpg
+
+- type: apt
+  name: Install debian packages
+  packages:
+    - 7zip
+    - aladin
+    - aptitude
+    - avrdude
+    - claws-mail
+    - claws-mail-extra-plugins
+    - claws-mail-plugins
+    - exfat-fuse
+    - ffmpeg
+    - geeqie
+    - gftp
+    - gimp
+    - git-gui
+    - gitk
+    - grsync
+    - handbrake
+    - htop
+    - imagemagick
+    - keepassxc
+    - libimage-exiftool-perl
+    - mangohud
+    - mc
+    - meld
+    - nvtop
+    - pdftk-java
+    - rename
+    - software-properties-common
+    - solaar
+    - sshfs
+    - sshpass
+    - vim-gtk3
+    - vlc
+    - xsane
+
+- type: apt
+  name: Install TeX Live (full, several GB)
+  packages:
+    - texlive-full
+
+- type: git
+  name: Install/Update NERDTree (vim8 native package, no plugin manager needed)
+  src: https://github.com/preservim/nerdtree.git
+  dest: ~/.vim/pack/vendor/start/nerdtree
+
+- type: shell
+  name: Generate NERDTree helptags
+  needs:
+    - 'Install debian packages'
+    - 'Install/Update NERDTree (vim8 native package, no plugin manager needed)'
+  commands:
+    - 'vim -u NONE -c "helptags ~/.vim/pack/vendor/start/nerdtree/doc" -c q'
+  creates: "~/.vim/pack/vendor/start/nerdtree/doc/tags"
+
+- type: git
+  name: Install/Update NERDCommenter (vim8 native package)
+  src: https://github.com/preservim/nerdcommenter.git
+  dest: ~/.vim/pack/vendor/start/nerdcommenter
+
+- type: shell
+  name: Generate NERDCommenter helptags
+  needs:
+    - 'Install debian packages'
+    - 'Install/Update NERDCommenter (vim8 native package)'
+  commands:
+    - 'vim -u NONE -c "helptags ~/.vim/pack/vendor/start/nerdcommenter/doc" -c q'
+  creates: "~/.vim/pack/vendor/start/nerdcommenter/doc/tags"
+
+- type: file
+  name: Configure vim (~/.vimrc)
+  # Overwrites an existing ~/.vimrc. NERDCommenter needs the `filetype plugin
+  # indent on` line in it.
+  src: files/vimrc
+  dest: ~/.vimrc
+  mode: "644"
+
+- type: apt
+  name: Install kernel module build tools
+  # build-essential + matching kernel headers is what's needed to compile
+  # any out-of-tree kernel module; dkms rebuilds such modules automatically
+  # after a kernel upgrade (relevant for e.g. VirtualBox/NVIDIA-style DKMS
+  # packages, not needed for in-tree drivers like the AMD one below).
+  packages:
+    - build-essential
+    - dkms
+    - "linux-headers-{kernel_release}"
+
+- type: apt
+  name: Install AMD GPU driver (Mesa Vulkan/OpenCL)
+  # NOTE: verify these package names still exist in the Ubuntu 26.04
+  # archive before relying on this - names occasionally get renamed
+  # between LTS releases.
+  packages:
+    - mesa-vulkan-drivers
+    - mesa-opencl-icd
+    - linux-firmware-amd-graphics
+  when_gpu: amd
+
+- type: fstab
+  name: Mount second hard disk under ~/media
+  # Desktop-only disk; skipped automatically on machines where this UUID
+  # doesn't exist. Produces exactly:
+  # /dev/disk/by-uuid/b81ce09c-6721-4783-ac51-8942c47fbc75 /home/<you>/media auto nosuid,nodev,nofail,x-gvfs-show 0 0
+  device: /dev/disk/by-uuid/b81ce09c-6721-4783-ac51-8942c47fbc75
+  mountpoint: ~/media
+  fstype: auto
+  options: nosuid,nodev,nofail,x-gvfs-show
+  dump: 0
+  pass: 0
+
+- type: shell
+  name: Configure Git identity
+  # Sets only these keys with `git config --global`, so the rest of an
+  # existing ~/.gitconfig stays; different existing values are overwritten.
+  # After forking this repo, change the name and email here (they appear in
+  # the check and in the commands).
+  commands:
+    - 'git config --global user.name "<your name>"'
+    - 'git config --global user.email "<your email>"'
+    - 'git config --global init.defaultBranch main'
+  unless: '[ "$(git config --global user.name)" = "<your name>" ] && [ "$(git config --global user.email)" = "<your email>" ] && [ "$(git config --global init.defaultBranch)" = "main" ]'
+
+- type: apt-repo
+  name: Add Docker apt repository
+  key_src: https://download.docker.com/linux/ubuntu/gpg
+  key_dest: docker.gpg
+  filename: docker
+  # NOTE: "suites" must be a codename Docker's repo actually publishes.
+  # Third-party repos often lag behind the newest Ubuntu release; Docker
+  # publishes "resolute" (26.04) - checked against
+  # https://download.docker.com/linux/ubuntu/dists/ - so the exact codename
+  # is used. If a future release isn't there yet, use the closest older one.
+  uris: https://download.docker.com/linux/ubuntu
+  suites: resolute
+  components: stable
+  architectures: amd64
+
+- type: apt
+  name: Install Docker Engine
+  needs: 'Add Docker apt repository'
+  # `update: true` because the repo above was only just added - apt needs
+  # to re-index before it knows this package exists.
+  packages:
+    - docker-ce
+  update: true
+
+- type: user-group
+  name: Allow running Docker without sudo
+  # Takes effect on your NEXT login (or `newgrp docker`) - not in the
+  # shell that ran this deploy.
+  groups:
+    - docker
+
+- type: git
+  name: Install/Update claude-docker (clone, then pull the latest main)
+  # Tracks `main` of the repo: every run pulls the latest script. Only the
+  # symlink entry below puts it on the PATH.
+  src: https://github.com/RobertZebahl/claude-docker.git
+  dest: ~/.local/share/claude-docker
+
+- type: shell
+  name: Install claude-docker into ~/.local/bin
+  # The script runs Claude Code in a Docker sandbox (it builds its own image),
+  # so it needs Docker and access to the daemon: hence the `needs:`. Docker
+  # works without sudo only after your next login.
+  needs:
+    - Install/Update claude-docker (clone, then pull the latest main)
+    - Install Docker Engine
+    - Allow running Docker without sudo
+  commands:
+    - 'mkdir -p "$HOME/.local/bin" && ln -sfn "$HOME/.local/share/claude-docker/claude-docker" "$HOME/.local/bin/claude-docker"'
+  unless: 'test "$(readlink "$HOME/.local/bin/claude-docker")" = "$HOME/.local/share/claude-docker/claude-docker"'
+
+- type: apt-ppa
+  name: Add Siril PPA
+  needs: Install debian packages
+  ppa: "ppa:lock042/siril"
+
+- type: apt
+  name: Install Siril
+  needs: 'Add Siril PPA'
+  # NOTE: PPAs only publish packages for the Ubuntu series their maintainer
+  # has actually built against - check
+  # https://launchpad.net/~lock042/+archive/ubuntu/siril/+packages for a
+  # build matching your Ubuntu 26.04 series before relying on this; if
+  # there isn't one yet, `apt-add-repository` still succeeds but this
+  # install step will fail with "package not found".
+  packages:
+    - siril
+  update: true
+
+- type: apt-repo
+  name: Add Darktable apt repository
+  # Darktable's official packages come from the openSUSE Build Service.
+  # It's a flat repo (no suites/components), hence `suites: /` and no
+  # `components`. The URL contains the Ubuntu version, so change
+  # xUbuntu_26.04 if you deploy a different release (verified present
+  # for 23.04 through 26.04 at the time of writing).
+  key_src: https://download.opensuse.org/repositories/graphics:darktable/xUbuntu_26.04/Release.key
+  key_dest: darktable.gpg
+  filename: darktable
+  uris: https://download.opensuse.org/repositories/graphics:/darktable/xUbuntu_26.04/
+  suites: /
+
+- type: apt
+  name: Install Darktable
+  needs: 'Add Darktable apt repository'
+  packages:
+    - darktable
+  update: true
+
+- type: apt-ppa
+  name: Add MakeMKV PPA
+  needs: Install debian packages
+  # Unofficial PPA; it publishes builds for 26.04 ("resolute") as of writing.
+  ppa: "ppa:heyarje/makemkv-beta"
+
+- type: apt
+  name: Install MakeMKV
+  needs: 'Add MakeMKV PPA'
+  # makemkv-oss is the open-source part, makemkv-bin the closed-source
+  # binaries; the GUI needs both. The program runs as a time-limited
+  # beta until you enter a key in its settings.
+  packages:
+    - makemkv-oss
+    - makemkv-bin
+  update: true
+
+- type: apt-repo
+  name: Add Skychart (Cartes du Ciel) apt repository
+  # Upstream's repo has a single suite, "unstable", which is its name for
+  # the current release channel (not a distro codename), so it works for
+  # any Ubuntu release. Key fingerprint C78A8108E90DE5CC90FE46A48B8B57C1AA716FC2
+  # matches the one already used on the current machine.
+  key_src: https://vega.ap-i.net/apt/key
+  key_dest: skychart.gpg
+  filename: skychart
+  uris: https://vega.ap-i.net/apt
+  suites: unstable
+  components: main
+
+- type: apt
+  name: Install Skychart (Cartes du Ciel)
+  needs: 'Add Skychart (Cartes du Ciel) apt repository'
+  packages:
+    - skychart
+    - skychart-data-stars
+    - skychart-data-dso
+    - skychart-data-pictures
+  update: true
+
+- type: apt-repo
+  name: Add Visual Studio Code apt repository
+  # Microsoft's repo has one "stable" suite for all Ubuntu releases. The
+  # `code` package's postinstall detects this existing source (by its URI)
+  # and skips writing a second, conflicting one, so it's safe to manage here.
+  # Key fingerprint BC528686B50D79E339D3721CEB3E94ADBE1229CF matches the one
+  # on the current machine.
+  key_src: https://packages.microsoft.com/keys/microsoft.asc
+  key_dest: microsoft.gpg
+  filename: vscode
+  uris: https://packages.microsoft.com/repos/code
+  suites: stable
+  components: main
+  architectures: amd64
+
+- type: apt
+  name: Install Visual Studio Code
+  needs: 'Add Visual Studio Code apt repository'
+  packages:
+    - code
+  update: true
+
+- type: apt-repo
+  name: Add Oracle VirtualBox apt repository
+  # NOTE: unlike most third-party repos, "suites" here IS the Ubuntu
+  # codename (resolute = 26.04, noble = 24.04), so change it if you
+  # deploy a different release. Oracle publishes it for 26.04 as of
+  # writing.
+  key_src: https://www.virtualbox.org/download/oracle_vbox_2016.asc
+  key_dest: oracle-virtualbox-2016.gpg
+  filename: virtualbox
+  uris: https://download.virtualbox.org/virtualbox/debian
+  suites: resolute
+  components: contrib
+  architectures: amd64
+
+- type: apt
+  name: Install VirtualBox (includes the Guest Additions ISO)
+  needs: 'Add Oracle VirtualBox apt repository'
+  # Oracle's package ships VBoxGuestAdditions.iso in /usr/share/virtualbox/,
+  # so "Devices > Insert Guest Additions CD" works with nothing extra. Do NOT
+  # add Ubuntu's separate `virtualbox-guest-additions-iso` - it conflicts.
+  # This also replaces Ubuntu's own `virtualbox`/`virtualbox-dkms`/
+  # `virtualbox-qt` if they're installed. The package name carries the
+  # version; bump it (e.g. virtualbox-7.3) when Oracle publishes a new
+  # series. Kernel modules are built with the tools from "Install kernel
+  # module build tools" above.
+  packages:
+    - virtualbox-7.2
+  update: true
+
+- type: user-group
+  name: Allow VirtualBox USB passthrough
+  needs: 'Install VirtualBox (includes the Guest Additions ISO)'
+  # The vboxusers group is created by the virtualbox package above, so this
+  # entry must stay below it. Takes effect on your NEXT login. USB 2.0/3.0
+  # (as opposed to 1.1) also needs the Extension Pack, installed below.
+  groups:
+    - vboxusers
+
+- type: shell
+  name: Install VirtualBox Extension Pack (USB 2.0/3.0, PXE boot, ...)
+  needs: 'Install VirtualBox (includes the Guest Additions ISO)'
+  sudo: true
+  # LICENCE: the Extension Pack is under Oracle's PUEL - free for personal
+  # use and evaluation only; business/commercial use needs a paid licence.
+  # `--accept-license` below accepts that licence on your behalf. The value
+  # is the SHA-256 of the pack's ExtPack-license.txt, pinned deliberately: if
+  # Oracle ever changes the licence text the install fails instead of
+  # silently accepting new terms - re-read it, then update the hash.
+  # The pack version must match the installed VirtualBox exactly, so both
+  # steps derive it from `VBoxManage --version`. `--replace` upgrades an
+  # older pack after a VirtualBox upgrade, and the guard re-runs this
+  # entry whenever the installed pack's version differs.
+  commands:
+    - >-
+      V=$(VBoxManage --version | sed -E 's/[_r].*//')
+      && D=$(mktemp -d) && trap 'rm -rf "$D"' EXIT
+      && F="Oracle_VirtualBox_Extension_Pack-$V.vbox-extpack"
+      && curl -fsSL -o "$D/$F" "https://download.virtualbox.org/virtualbox/$V/$F"
+      && VBoxManage extpack install --replace
+      --accept-license=eb31505e56e9b4d0fbca139104da41ac6f6b98f8e78968bdf01b1f3da3c4f9ae
+      "$D/$F"
+  unless: 'V=$(VBoxManage --version | sed -E "s/[_r].*//"); VBoxManage list extpacks | grep -A2 "Oracle VirtualBox Extension Pack" | grep -q "^Version: *$V$"'
+
+- type: shell
+  name: Enable i386 multiarch (Steam is a 32-bit application)
+  sudo: true
+  commands:
+    - "dpkg --add-architecture i386"
+  unless: "dpkg --print-foreign-architectures | grep -qx i386"
+
+- type: apt-repo
+  name: Add Steam apt repository (Valve)
+  # Valve's own repo, one "stable" suite for every Ubuntu release. Its key
+  # is already a binary keyring (apt.key's dearmor step passes it through
+  # unchanged); fingerprints match the ones on the current machine.
+  #
+  # The key goes to /usr/share/keyrings/steam.gpg, not /etc/apt/keyrings/,
+  # on purpose: the `steam-launcher` package ships its own apt source
+  # (steam-stable.list) that names exactly that path as `signed-by`. Two
+  # sources for the same repo with different `Signed-By` keys make apt
+  # refuse to read its source list at all ("Conflicting values set for
+  # option Signed-By"), which broke every apt step after Steam. With the
+  # same key path both sources agree, so apt only warns that the repo is
+  # configured twice.
+  key_src: https://repo.steampowered.com/steam/archive/stable/steam.gpg
+  key_dest: /usr/share/keyrings/steam.gpg
+  # Once steam-launcher is installed its own source file provides the repo
+  # (and the entry below removes ours), so don't add ours again.
+  skip_if_exists: /etc/apt/sources.list.d/steam-stable.list
+  filename: steam
+  uris: https://repo.steampowered.com/steam/
+  suites: stable
+  components: steam
+  architectures: amd64 i386
+
+- type: apt
+  name: Install Steam
+  needs: 'Add Steam apt repository (Valve)'
+  # Valve's `steam-launcher` conflicts with (and replaces) Ubuntu's own
+  # `steam-installer`, so don't install both. It pulls in steam-libs-amd64
+  # and steam-libs-i386 as recommended packages. No debconf licence prompt
+  # at install time; the Steam agreement is shown on first launch.
+  packages:
+    - steam-launcher
+  update: true
+
+- type: shell
+  name: Remove Steam apt source (steam-launcher ships its own)
+  needs: Install Steam
+  sudo: true
+  # The package installs its own source (steam-stable.list), so ours is now
+  # a duplicate that makes every `apt update` print "configured multiple
+  # times" warnings. It was only needed to install the package the first time.
+  commands:
+    - "rm -f /etc/apt/sources.list.d/steam.sources"
+  unless: "! test -e /etc/apt/sources.list.d/steam.sources"
+
+- type: github-deb
+  name: Install/Update Heroic Games Launcher (latest release)
+  repo: Heroic-Games-Launcher/HeroicGamesLauncher
+  match: amd64
+  package: heroic
+
+- type: snap
+  name: Install PyCharm
+  # "pycharm-community" is the free edition; swap for "pycharm-professional"
+  # if you have a license. Both need classic confinement (full filesystem/
+  # network access), which is normal for a full IDE.
+  packages:
+    - pycharm-community
+  classic: true
+
+- type: snap
+  name: Install Video Downloader
+  # GUI frontend for yt-dlp by unrud; strictly confined, so no `classic`.
+  packages:
+    - video-downloader
+
+- type: shell
+  name: Install Epson scanner driver (Epson Scan 2, for the Perfection V39)
+  # Epson only ships this as a bundle download (no apt repository, no GitHub
+  # release), and its site refuses scripted downloads, so the bundle
+  # (epsonscan2-bundle-<version>.x86_64.deb.tar.gz) has to be in this
+  # repository's files/ directory. With several bundles there, the highest
+  # version wins. It contains the driver (`epsonscan2`) and its firmware
+  # plugin (`epsonscan2-non-free-plugin`), which both get installed together,
+  # so a newer plugin comes along too. The Perfection V39 is USB id 04b8:013d
+  # (firmware esfw010c.bin); the V39 II, 013f, is covered by the same bundle.
+  # Runs again when the bundle is newer than the installed driver. Without a
+  # bundle it is skipped if the driver is installed already, and fails saying
+  # where to get one otherwise; like any failed entry it doesn't stop the run.
+  # Paths are relative to the directory PyInfra runs in, which is this
+  # repository's root (deploy.sh changes into it first).
+  sudo: true
+  commands:
+    - |
+      set -e
+      bundle=$(ls files/epsonscan2-bundle-*.x86_64.deb.tar.gz 2>/dev/null | sort -V | tail -n 1)
+      if [ -z "$bundle" ]; then
+        echo "No epsonscan2-bundle-*.x86_64.deb.tar.gz in $PWD/files. Download the Linux bundle (deb) from https://support.epson.net/linux/en/epsonscan2.php and put it there." >&2
+        exit 1
+      fi
+      tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
+      chmod 755 "$tmp"  # so that apt's unprivileged download user can read the .debs
+      tar -xzf "$bundle" -C "$tmp"
+      DEBIAN_FRONTEND=noninteractive apt-get install -y "$tmp"/*/core/*.deb "$tmp"/*/plugins/*.deb
+  unless: >-
+    bundle=$(ls files/epsonscan2-bundle-*.x86_64.deb.tar.gz 2>/dev/null | sort -V | tail -n 1);
+    installed=$(dpkg-query -W -f '${db:Status-Abbrev} ${Version}' epsonscan2 2>/dev/null | sed -n 's/^ii  *//p');
+    if [ -z "$bundle" ]; then [ -n "$installed" ];
+    else v=$(basename "$bundle" .x86_64.deb.tar.gz); v=${v#epsonscan2-bundle-};
+    [ -n "$installed" ] && dpkg --compare-versions "$installed" ge "$v"; fi
+
+- type: shell
+  name: Update uv
+  # Follows upstream: `uv self update` works for the standalone install that
+  # deploy.sh does (it has an installer receipt in ~/.config/uv). It runs only
+  # if `--dry-run` says a newer version exists, so a repeat run reports "No
+  # changes" until uv publishes one. Without a connection, or for a uv that
+  # was installed some other way (pip, apt), the dry run prints no "Would
+  # update" and the entry is skipped quietly. Above the uv-tool/uv-pip
+  # entries, which run with the updated uv.
+  commands:
+    - 'PATH="$HOME/.local/bin:$PATH" uv self update'
+  unless: '! PATH="$HOME/.local/bin:$PATH" uv self update --dry-run 2>&1 | grep -q "Would update"'
+
+- type: file
+  name: Configure uv to use only locally installed Python versions
+  # `python-downloads = "never"`: uv doesn't fetch interpreters. And
+  # `python-preference = "only-system"`: it uses only the Pythons the system
+  # provides (Ubuntu's own python3 covers requires-python of this repo), not
+  # managed ones from `uv python install` either. Overwrites an existing
+  # ~/.config/uv/uv.toml.
+  src: files/uv.toml
+  dest: ~/.config/uv/uv.toml
+  mode: "644"
+
+- type: uv-tool
+  name: Install ruff
+  tools:
+    - ruff
+
+- type: shell
+  name: Install Claude Code (native installer)
+  # The native installer auto-updates itself in the background afterwards -
+  # no separate update step needed. (Alternatives - npm, apt/dnf/apk,
+  # Homebrew - all require manual updates instead.)
+  commands:
+    - "curl -fsSL https://claude.ai/install.sh | bash"
+  creates: "~/.local/bin/claude"
+
+- type: apt-repo
+  name: Add NodeSource apt repository (Node.js 22.x)
+  # Ubuntu 26.04's own `nodejs` is 22.22, which would already meet the
+  # `skills` CLI's minimum (>= 22.20), but Ubuntu ships npm/npx as separate
+  # packages while NodeSource's `nodejs` bundles them and tracks the 22.x
+  # line. NodeSource publishes one repo for all Ubuntu
+  # releases under the suite name "nodistro". To move to a newer major
+  # version, change "node_22.x" here.
+  key_src: https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key
+  key_dest: nodesource.gpg
+  filename: nodesource
+  uris: https://deb.nodesource.com/node_22.x
+  suites: nodistro
+  components: main
+  architectures: amd64
+
+- type: apt
+  name: Install Node.js (from NodeSource)
+  needs: 'Add NodeSource apt repository (Node.js 22.x)'
+  packages:
+    - nodejs
+  update: true
+
+- type: shell
+  name: Install Claude Code skills (grill-me, grill-with-docs)
+  needs: 'Install Node.js (from NodeSource)'
+  # Non-interactive: without -g/-a/-y the `skills` CLI prompts for scope,
+  # agent and confirmation. grill-me and grill-with-docs are thin wrappers
+  # that call the `grilling` and `domain-modeling` skills, so those come
+  # too. The inline version check fails this step loudly (instead of
+  # letting npx misbehave) if Node is older than the CLI's 22.20 minimum.
+  # Skills don't auto-update; refresh with `npx skills@latest update -g -y`.
+  commands:
+    - >-
+      node -e 'const [a,b]=process.versions.node.split(".").map(Number);
+      process.exit(a>22||(a===22&&b>=20)?0:1)'
+      || { echo "skills CLI needs Node >= 22.20, found $(node -v)" >&2; exit 1; }
+      && npx --yes skills@latest add mattpocock/skills -g -a claude-code -y
+      -s grilling grill-me grill-with-docs domain-modeling
+  unless: "test -e ~/.claude/skills/grilling && test -e ~/.claude/skills/grill-me && test -e ~/.claude/skills/grill-with-docs && test -e ~/.claude/skills/domain-modeling"
+
+- type: file
+  name: Configure Claude Code to ask outside the working directory
+  needs: 'Install Claude Code (native installer)'
+  # Managed settings: root-owned, and no user/project setting or command-line
+  # flag overrides them. Claude Code refuses to start if this file isn't
+  # valid JSON or can't be read, hence `mode`.
+  # What the file sets is explained in the README.
+  src: files/claude-ask-outside-cwd.json
+  dest: /etc/claude-code/managed-settings.d/10-ask-outside-cwd.json
+  mode: "644"
+  sudo: true
