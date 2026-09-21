@@ -1,0 +1,5 @@
+.venv/
+__pycache__/
+.idea/
+# Epson's license forbids distributing the bundle (see README, "Epson scanner driver")
+files/epsonscan2-bundle-*.tar.gz
