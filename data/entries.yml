@@ -674,3 +674,13 @@
   dest: /etc/claude-code/managed-settings.d/10-ask-outside-cwd.json
   mode: "644"
   sudo: true
+
+- type: file
+  name: Stop the Logi Bolt receiver from waking the PC
+  # Works around a hang on suspend: a mouse/keyboard wakeup in the last moment
+  # cancels the suspend, and amdgpu (RX 6600) can't resume from a cancelled
+  # one. Wake the PC with the power button. See the README.
+  src: files/90-logi-bolt-no-wakeup.rules
+  dest: /etc/udev/rules.d/90-logi-bolt-no-wakeup.rules
+  mode: "644"
+  sudo: true

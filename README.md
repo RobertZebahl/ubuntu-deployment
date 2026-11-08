@@ -463,6 +463,24 @@ different existing values for these three. **If you clone this repo, change
 the name and email in that entry** (they appear in its check and in its
 commands); they are what your commits get.
 
+### Suspend hang: no wakeup from the Logi Bolt receiver
+
+On this PC (MSI X570, Radeon RX 6600) a suspend sometimes ended in a black
+screen, high CPU load and a dead machine. The cause: a wakeup event arriving
+in the last moment of a suspend cancels it ("Wakeup pending. Abort CPU
+freeze" in the kernel log), and the amdgpu driver can't bring the GPU back
+from a cancelled suspend ("SMU: No response", "GPU Recovery Failed"). This
+is an amdgpu bug and happened on Ubuntu 24.04 too.
+
+The "Stop the Logi Bolt receiver from waking the PC" entry installs
+`files/90-logi-bolt-no-wakeup.rules` to `/etc/udev/rules.d/`, which turns
+off wakeup for the receiver (USB id `046d:c548`), the PC's only USB wakeup
+source. The rule takes effect at the next boot or when the receiver is
+plugged in again; to apply it right away, run
+`sudo udevadm trigger --action=add --attr-match=idProduct=c548`. Wake the PC
+with the power button; mouse and keyboard no longer wake it. To undo, delete
+the rules file and reboot.
+
 ### Mounting a disk automatically
 
 `fstab` entries (see the second-hard-disk example in `data/entries.yml`)

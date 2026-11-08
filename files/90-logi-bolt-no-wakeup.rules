@@ -1,0 +1,5 @@
+# Don't let the Logi Bolt receiver (mouse/keyboard) wake the PC from suspend.
+# A wakeup arriving in the last moment of a suspend cancels it, and the amdgpu
+# driver (RX 6600) can't recover from a cancelled suspend: black screen, hang.
+# Wake the PC with the power button instead.
+ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="046d", ATTR{idProduct}=="c548", ATTR{power/wakeup}=="*", ATTR{power/wakeup}="disabled"
