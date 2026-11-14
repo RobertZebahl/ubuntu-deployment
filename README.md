@@ -400,6 +400,16 @@ isn't set. GVim reports Ctrl+- as `<C-_>` (only the numpad minus is
 since the font belongs to the terminal: GNOME Terminal zooms with Ctrl++,
 Ctrl+- and Ctrl+0.
 
+### Bash: case-insensitive tab completion (`~/.inputrc`)
+
+The "Configure readline" entry deploys `files/inputrc` to `~/.inputrc`,
+**overwriting** an existing one; edit `files/inputrc`, not the deployed copy.
+It sets `completion-ignore-case on`, so `cd dow<Tab>` completes to
+`Downloads/`. A `~/.inputrc` replaces `/etc/inputrc` rather than adding to
+it, so the file starts with `$include /etc/inputrc` to keep Ubuntu's defaults.
+Readline reads the file when a shell starts: open a new terminal, or run
+`bind -f ~/.inputrc` in an open one.
+
 ### Claude Code skills and the Node.js requirement
 
 The skills entry runs `npx skills@latest add mattpocock/skills`. That CLI

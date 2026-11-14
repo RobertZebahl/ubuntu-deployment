@@ -212,6 +212,15 @@
   dest: ~/.vimrc
   mode: "644"
 
+- type: file
+  name: Configure readline (~/.inputrc)
+  # Case-insensitive tab completion in bash. Overwrites an existing
+  # ~/.inputrc; the file includes /etc/inputrc, which a ~/.inputrc would
+  # otherwise replace.
+  src: files/inputrc
+  dest: ~/.inputrc
+  mode: "644"
+
 - type: apt
   name: Install kernel module build tools
   # build-essential + matching kernel headers is what's needed to compile

@@ -1,0 +1,7 @@
+# Readline settings (bash and other readline programs), deployed to ~/.inputrc.
+# A ~/.inputrc replaces /etc/inputrc instead of adding to it, so pull in the
+# system defaults first.
+$include /etc/inputrc
+
+# Tab completion ignores case: `cd dow<Tab>` completes to `Downloads/`.
+set completion-ignore-case on
