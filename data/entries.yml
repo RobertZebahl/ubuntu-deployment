@@ -262,12 +262,17 @@
   # After forking this repo, change the name and email here (they appear in
   # the check and in the commands).
   commands:
-    - 'git config --global user.name "<your name>"'
-    - 'git config --global user.email "<your email>"'
+    - 'git config --global user.name "Robert Zebahl"'
+    - 'git config --global user.email "r.zebahl@gmx.de"'
     - 'git config --global init.defaultBranch main'
     - 'git config --global merge.ff false'
     - 'git config --global pull.rebase true'
-  unless: '[ "$(git config --global user.name)" = "<your name>" ] && [ "$(git config --global user.email)" = "<your email>" ] && [ "$(git config --global init.defaultBranch)" = "main" ]'
+  unless: >-
+    [ "$(git config --global user.name)" = "Robert Zebahl" ] &&
+    [ "$(git config --global user.email)" = "r.zebahl@gmx.de" ] &&
+    [ "$(git config --global init.defaultBranch)" = "main" ] &&
+    [ "$(git config --global merge.ff)" = "false" ] &&
+    [ "$(git config --global pull.rebase)" = "true" ]
 
 - type: apt-repo
   name: Add Docker apt repository

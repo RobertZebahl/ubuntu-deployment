@@ -466,10 +466,12 @@ delete the file on a machine that already has it, as with any entry.
 
 ### Git identity
 
-The "Configure Git identity" entry sets `user.name`, `user.email` and
-`init.defaultBranch` with `git config --global`. It changes only those
-keys, so the rest of an existing `~/.gitconfig` stays, and it overwrites
-different existing values for these three. **If you clone this repo, change
+The "Configure Git identity" entry sets `user.name`, `user.email`,
+`init.defaultBranch`, `merge.ff` (to `false`) and `pull.rebase` (to `true`)
+with `git config --global`. It changes only those keys, so the rest of an
+existing `~/.gitconfig` stays, and it overwrites different existing values
+for these five. Its check compares all five, so the entry runs again
+whenever any of them differs. **If you clone this repo, change
 the name and email in that entry** (they appear in its check and in its
 commands); they are what your commits get.
 
