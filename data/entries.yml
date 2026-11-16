@@ -162,6 +162,7 @@
     - meld
     - nvtop
     - pdftk-java
+    - php-cli
     - rename
     - software-properties-common
     - solaar
