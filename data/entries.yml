@@ -223,15 +223,58 @@
   mode: "644"
 
 - type: apt
-  name: Install kernel module build tools
-  # build-essential + matching kernel headers is what's needed to compile
-  # any out-of-tree kernel module; dkms rebuilds such modules automatically
-  # after a kernel upgrade (relevant for e.g. VirtualBox/NVIDIA-style DKMS
-  # packages, not needed for in-tree drivers like the AMD one below).
+  name: Install build tools (C/C++ compiler, make, pkg-config)
+  # The general toolchain: gcc/g++/make, and the C linker (`cc`) that Rust
+  # needs too. pkg-config + libssl-dev are what most Rust crates with
+  # native dependencies look for (openssl-sys, ...).
   packages:
     - build-essential
+    - pkg-config
+    - libssl-dev
+
+- type: apt
+  name: Install kernel module build tools
+  needs: Install build tools (C/C++ compiler, make, pkg-config)
+  # The compiler (entry above) + matching kernel headers is what's needed to
+  # compile any out-of-tree kernel module; dkms rebuilds such modules
+  # automatically after a kernel upgrade (relevant for e.g. VirtualBox/
+  # NVIDIA-style DKMS packages, not needed for in-tree drivers like the AMD
+  # one below).
+  packages:
     - dkms
     - "linux-headers-{kernel_release}"
+
+- type: shell
+  name: Install Rust (rustup, stable toolchain)
+  needs: Install build tools (C/C++ compiler, make, pkg-config)
+  # Official installer, per user, no sudo. The default profile includes
+  # cargo, clippy and rustfmt. It adds ~/.cargo/bin to PATH via ~/.profile
+  # and ~/.bashrc, which takes effect in a new login session. Skipped if
+  # rustup is already there.
+  commands:
+    - "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y"
+  creates: "~/.cargo/bin/rustup"
+
+- type: shell
+  name: Install Rust standard library sources (for RustRover)
+  needs: Install Rust (rustup, stable toolchain)
+  # RustRover needs rust-src to navigate and complete the standard library.
+  # A separate entry (not an installer flag) so that it also covers a rustup
+  # that was installed before.
+  commands:
+    - '"$HOME/.cargo/bin/rustup" component add rust-src'
+  unless: '"$HOME/.cargo/bin/rustup" component list --installed | grep -q "^rust-src"'
+
+- type: shell
+  name: Update Rust toolchain
+  needs: Install Rust (rustup, stable toolchain)
+  # Track entry: runs `rustup update` (toolchain and rustup itself) only if
+  # `rustup check` reports something newer, so a repeat run says "No
+  # changes" until a new release is out. Without a connection the check
+  # prints no "Update available" and the entry is skipped quietly.
+  commands:
+    - '"$HOME/.cargo/bin/rustup" update'
+  unless: '! "$HOME/.cargo/bin/rustup" check 2>/dev/null | grep -q "Update available"'
 
 - type: apt
   name: Install AMD GPU driver (Mesa Vulkan/OpenCL)
@@ -556,6 +599,16 @@
   # network access), which is normal for a full IDE.
   packages:
     - pycharm-community
+  classic: true
+
+- type: snap
+  name: Install RustRover
+  needs: Install Rust (rustup, stable toolchain)
+  # Free for non-commercial use (sign in with a JetBrains account on first
+  # start); commercial use needs a license. Classic confinement like PyCharm.
+  # It finds the toolchain in ~/.cargo/bin.
+  packages:
+    - rustrover
   classic: true
 
 - type: snap

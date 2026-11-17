@@ -168,8 +168,9 @@ first checks whether something newer exists, applies it if so, and reports "No
 changes" otherwise. Track entries are named "Install/Update ..." (before the
 first run the thing may not be there), or just "Update ..." if the entry never
 installs it: the `git` entries (NERDTree, `claude-docker`), the `github-deb`
-entry (Heroic, which needs `package:` for the check) and "Update uv" (uv is
-installed by `deploy.sh` already). To keep something current, add such an
+entry (Heroic, which needs `package:` for the check), "Update uv" (uv is
+installed by `deploy.sh` already) and "Update Rust toolchain" (its own entry
+installs rustup). To keep something current, add such an
 entry for it that checks upstream first; nothing else does. (A
 tracked `git` checkout takes upstream changes without a review, see
 `claude-docker` below.)
@@ -228,16 +229,36 @@ while the run is planned). The comparison assumes the release tag equals the
 package's version, which holds for Heroic; check `dpkg-query -W <package>`
 for a new entry.
 
-### Building kernel modules
+### Build tools and kernel modules
 
-The "Install kernel module build tools" entry installs `build-essential`,
-`dkms`, and `linux-headers-{kernel_release}`. That last placeholder is
+The "Install build tools (C/C++ compiler, make, pkg-config)" entry installs
+`build-essential` (gcc, g++, make and the C linker that Rust needs too),
+`pkg-config` and `libssl-dev`, which most Rust crates with native
+dependencies look for. "Install kernel module build tools" builds on it and
+adds `dkms` and `linux-headers-{kernel_release}`. That last placeholder is
 resolved by `deploy.py` to the target's actual running kernel version
 (`uname -r`, via the `KernelVersion` fact) — it can't be a fixed value in
 the YAML since it's host- and time-specific and changes on every kernel
 upgrade. This covers building/rebuilding out-of-tree modules in general
 (e.g. VirtualBox or NVIDIA's DKMS-packaged drivers); it's not needed for
 the AMD GPU driver above, which is already built into the kernel.
+
+### Rust and RustRover
+
+Rust is installed per user with the official rustup installer (no sudo),
+into `~/.cargo` and `~/.rustup`, with the stable toolchain and the default
+profile (`cargo`, `clippy`, `rustfmt`). The entry is skipped if
+`~/.cargo/bin/rustup` exists. The installer adds `~/.cargo/bin` to `PATH`
+via `~/.profile` and `~/.bashrc`, so `cargo` works in a terminal only after a
+**new login session** (or `. ~/.cargo/env`). A second entry adds the
+`rust-src` component, which RustRover needs for the standard library. The
+track entry "Update Rust toolchain" runs `rustup update` whenever
+`rustup check` reports something newer.
+
+RustRover comes from its snap (`rustrover`, classic confinement, updates
+itself) and finds the toolchain in `~/.cargo/bin`. It is free for
+non-commercial use; on first start it asks you to sign in with a JetBrains
+account (or enter a license for commercial use).
 
 ### Adding a third-party apt repository
 
