@@ -150,6 +150,7 @@
     - geeqie
     - gimp
     - git-gui
+    - git-lfs
     - gitk
     - grsync
     - handbrake
